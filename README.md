@@ -4,15 +4,14 @@
 ![Docker Stars](https://img.shields.io/docker/stars/osixia/openldap.svg)
 ![](https://images.microbadger.com/badges/image/osixia/openldap.svg)
 
-Latest release: 1.1.8 - OpenLDAP 2.4.40 -  [Changelog](CHANGELOG.md) | [Docker Hub](https://hub.docker.com/r/osixia/openldap/) 
+Latest release: 1.1.10 - OpenLDAP 2.4.44 -  [Changelog](CHANGELOG.md) | [Docker Hub](https://hub.docker.com/r/osixia/openldap/) 
+
+/!\ Security warning: Databases created with image version up to 1.1.10 creates two admin users with the same password, if you changed admin password after bootstrap you may be concerned by [issue #161](https://github.com/osixia/docker-openldap/issues/161).
 
 **A docker image to run OpenLDAP.**
 
-Note:
- - In the release 1.1.6 files `*.yaml.startup` have been renamed to `*.startup.yaml`
- - Due to issues #44 and #73 versions before 1.1.6 are not considered as stable and tags will be removed from docker hub.
-
 > OpenLDAP website : [www.openldap.org](http://www.openldap.org/)
+
 
 - [Contributing](#contributing)
 - [Quick Start](#quick-start)
@@ -38,7 +37,7 @@ Note:
 		- [Link environment file](#link-environment-file)
 		- [Make your own image or extend this image](#make-your-own-image-or-extend-this-image)
 - [Advanced User Guide](#advanced-user-guide)
-	- [Extend osixia/openldap:1.1.8 image](#extend-osixiaopenldap118-image)
+	- [Extend osixia/openldap:1.1.10 image](#extend-osixiaopenldap1110-image)
 	- [Make your own openldap image](#make-your-own-openldap-image)
 	- [Tests](#tests)
 	- [Kubernetes](#kubernetes)
@@ -56,7 +55,7 @@ If you find this image useful here's how you can help:
 ## Quick Start
 Run OpenLDAP docker image:
 
-	docker run --name my-openldap-container --detach osixia/openldap:1.1.8
+	docker run --name my-openldap-container --detach osixia/openldap:1.1.10
 
 This start a new container with OpenLDAP running inside. Let's make the first search in our LDAP container:
 
@@ -92,12 +91,23 @@ It will create an empty ldap for the company **Example Inc.** and the domain **e
 By default the admin has the password **admin**. All those default settings can be changed at the docker command line, for example:
 
 	docker run --env LDAP_ORGANISATION="My Company" --env LDAP_DOMAIN="my-company.com" \
-	--env LDAP_ADMIN_PASSWORD="JonSn0w" --detach osixia/openldap:1.1.8
+	--env LDAP_ADMIN_PASSWORD="JonSn0w" --detach osixia/openldap:1.1.10
 
 #### Data persistence
 
 The directories `/var/lib/ldap` (LDAP database files) and `/etc/ldap/slapd.d`  (LDAP config files) are used to persist the schema and data information, and should be mapped as volumes, so your ldap files are saved outside the container (see [Use an existing ldap database](#use-an-existing-ldap-database)). However it can be useful to not use volumes,
 in case the image should be delivered complete with test data - this is especially useful when deriving other images from this one.
+
+The default uid and gid used by the image may map to surprising
+counterparts in the host. If you need to match uid and gid in the
+container and in the host, you can use build parameters
+`LDAP_OPENLDAP_UID` and `LDAP_OPENLDAP_GID` to set uid and gid
+explicitly:
+
+	docker build --build-arg LDAP_OPENLDAP_GID=1234 --build-arg LDAP_OPENLDAP_UID=2345 -t my_ldap_image .
+	docker run --name my_ldap_container -d my_ldap_image
+	# this should output uid=2345(openldap) gid=1234(openldap) groups=1234(openldap)
+	docker exec my_ldap_container id openldap
 
 For more information about docker data volume, please refer to:
 
@@ -108,6 +118,31 @@ For more information about docker data volume, please refer to:
 
 Do not edit slapd.conf it's not used. To modify your server configuration use ldap utils: **ldapmodify / ldapadd / ldapdelete**
 
+#### Seed ldap database with ldif
+
+This image can load ldif files at startup with either `ldapadd` or `ldapmodify`.
+Mount `.ldif` in `/container/service/slapd/assets/config/bootstrap/ldif` directory if you want to overwrite image default boostrap ldif files or in `/container/service/slapd/assets/config/bootstrap/ldif/custom` (recommended) to extend image config.
+
+Files containing `changeType:` attributes will be loaded with `ldapmodify`.
+
+The startup script provide some substitution in bootstrap ldif files:
+`{{LDAP_BASE_DN }}` and `{{ LDAP_BACKEND }}` values are supported. Other `{{ * }}`
+substitution are left as is.
+
+Since startup script modifies `ldif` files, you **must** add `--copy-service`
+argument to entrypoint if you don't want to overwrite them.
+
+
+		# single file example:
+		docker run \
+      --volume ./bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/50-bootstrap.ldif \
+      osixia/openldap:1.1.10 --copy-service
+
+		#directory example:
+		docker run \
+	     --volume ./lidf:/container/service/slapd/assets/config/bootstrap/ldif/custom \
+	     osixia/openldap:1.1.10 --copy-service
+
 ### Use an existing ldap database
 
 This can be achieved by mounting host directories as volume.
@@ -116,8 +151,8 @@ and the corresponding LDAP config files on your docker host in the directory `/d
 simply mount this directories as a volume to `/var/lib/ldap` and `/etc/ldap/slapd.d`:
 
 	docker run --volume /data/slapd/database:/var/lib/ldap \
-	--volume /data/slapd/config:/etc/ldap/slapd.d
-	--detach osixia/openldap:1.1.8
+	--volume /data/slapd/config:/etc/ldap/slapd.d \
+	--detach osixia/openldap:1.1.10
 
 You can also use data volume containers. Please refer to:
 > [https://docs.docker.com/engine/tutorials/dockervolumes/](https://docs.docker.com/engine/tutorials/dockervolumes/)
@@ -137,9 +172,9 @@ If you are looking for a simple solution to administrate your ldap server you ca
 #### Use auto-generated certificate
 By default, TLS is already configured and enabled, certificate is created using container hostname (it can be set by docker run --hostname option eg: ldap.example.org).
 
-	docker run --hostname ldap.my-company.com --detach osixia/openldap:1.1.8
+	docker run --hostname ldap.my-company.com --detach osixia/openldap:1.1.10
 
-#### Use your own certificate
+#### Use your own certificate
 
 You can set your custom certificate at run time, by mounting a directory containing those files to **/container/service/slapd/assets/certs** and adjust their name with the following environment variables:
 
@@ -147,28 +182,28 @@ You can set your custom certificate at run time, by mounting a directory contain
 	--env LDAP_TLS_CRT_FILENAME=my-ldap.crt \
 	--env LDAP_TLS_KEY_FILENAME=my-ldap.key \
 	--env LDAP_TLS_CA_CRT_FILENAME=the-ca.crt \
-	--detach osixia/openldap:1.1.8
+	--detach osixia/openldap:1.1.10
 
 Other solutions are available please refer to the [Advanced User Guide](#advanced-user-guide)
 
 #### Disable TLS
 Add --env LDAP_TLS=false to the run command:
 
-	docker run --env LDAP_TLS=false --detach osixia/openldap:1.1.8
+	docker run --env LDAP_TLS=false --detach osixia/openldap:1.1.10
 
 ### Multi master replication
 Quick example, with the default config.
 
 	#Create the first ldap server, save the container id in LDAP_CID and get its IP:
-	LDAP_CID=$(docker run --hostname ldap.example.org --env LDAP_REPLICATION=true --detach osixia/openldap:1.1.8)
+	LDAP_CID=$(docker run --hostname ldap.example.org --env LDAP_REPLICATION=true --detach osixia/openldap:1.1.10)
 	LDAP_IP=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" $LDAP_CID)
 
 	#Create the second ldap server, save the container id in LDAP2_CID and get its IP:
-	LDAP2_CID=$(docker run --hostname ldap2.example.org --env LDAP_REPLICATION=true --detach osixia/openldap:1.1.8)
+	LDAP2_CID=$(docker run --hostname ldap2.example.org --env LDAP_REPLICATION=true --detach osixia/openldap:1.1.10)
 	LDAP2_IP=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" $LDAP2_CID)
 
 	#Add the pair "ip hostname" to /etc/hosts on each containers,
-	#beacause ldap.example.org and ldap2.example.org are fake hostnames
+	#because ldap.example.org and ldap2.example.org are fake hostnames
 	docker exec $LDAP_CID bash -c "echo $LDAP2_IP ldap2.example.org >> /etc/hosts"
 	docker exec $LDAP2_CID bash -c "echo $LDAP_IP ldap.example.org >> /etc/hosts"
 
@@ -200,7 +235,7 @@ You may have some problems with mounted files on some systems. The startup scrip
 
 To fix that run the container with `--copy-service` argument :
 
-		docker run [your options] osixia/openldap:1.1.8 --copy-service
+		docker run [your options] osixia/openldap:1.1.10 --copy-service
 
 ### Debug
 
@@ -209,11 +244,11 @@ Available levels are: `none`, `error`, `warning`, `info`, `debug` and `trace`.
 
 Example command to run the container in `debug` mode:
 
-	docker run --detach osixia/openldap:1.1.8 --loglevel debug
+	docker run --detach osixia/openldap:1.1.10 --loglevel debug
 
 See all command line options:
 
-	docker run osixia/openldap:1.1.8 --help
+	docker run osixia/openldap:1.1.10 --help
 
 
 ## Environment Variables
@@ -245,6 +280,8 @@ Required and used for new ldap server only:
 - **LDAP_READONLY_USER_USERNAME** Read only user username. Defaults to `readonly`
 - **LDAP_READONLY_USER_PASSWORD** Read only user password. Defaults to `readonly`
 
+- **LDAP_RFC2307BIS_SCHEMA** Use rfc2307bis schema instead of nis schema. Defaults to `false`
+
 Backend:
 - **LDAP_BACKEND**: Ldap backend. Defaults to `hdb` (In comming versions v1.2.x default will be mdb)
 
@@ -270,19 +307,24 @@ Replication options:
 
 - **LDAP_REPLICATION_HOSTS**: list of replication hosts, must contain the current container hostname set by --hostname on docker run command. Defaults to :
 	```yaml
-	- ldap://ldap.example.org
+  - ldap://ldap.example.org
   - ldap://ldap2.example.org
 	```
 
 	If you want to set this variable at docker run command add the tag `#PYTHON2BASH:` and convert the yaml in python:
 
-		docker run --env LDAP_REPLICATION_HOSTS="#PYTHON2BASH:['ldap://ldap.example.org','ldap://ldap2.example.org']" --detach osixia/openldap:1.1.8
+		docker run --env LDAP_REPLICATION_HOSTS="#PYTHON2BASH:['ldap://ldap.example.org','ldap://ldap2.example.org']" --detach osixia/openldap:1.1.10
 
 	To convert yaml to python online: http://yaml-online-parser.appspot.com/
 
 Other environment variables:
+- **KEEP_EXISTING_CONFIG**: Do not change the ldap config. Defaults to `false`
+	- if set to *true* with an existing database, config will remain unchanged. Image tls and replication config will not be run. The container can be started with LDAP_ADMIN_PASSWORD and LDAP_CONFIG_PASSWORD empty or filled with fake data.
+	- if set to *true* when bootstrapping a new database, bootstap ldif and schema will not be added and tls and replication config will not be run.
+
 - **LDAP_REMOVE_CONFIG_AFTER_SETUP**: delete config folder after setup. Defaults to `true`
 - **LDAP_SSL_HELPER_PREFIX**: ssl-helper environment variables prefix. Defaults to `ldap`, ssl-helper first search config from LDAP_SSL_HELPER_* variables, before SSL_HELPER_* variables.
+- **HOSTNAME**: set the hostname of the running openldap server. Defaults to whatever docker creates.
 
 
 ### Set your own environment variables
@@ -291,7 +333,7 @@ Other environment variables:
 Environment variables can be set by adding the --env argument in the command line, for example:
 
 	docker run --env LDAP_ORGANISATION="My company" --env LDAP_DOMAIN="my-company.com" \
-	--env LDAP_ADMIN_PASSWORD="JonSn0w" --detach osixia/openldap:1.1.8
+	--env LDAP_ADMIN_PASSWORD="JonSn0w" --detach osixia/openldap:1.1.10
 
 Be aware that environment variable added in command line will be available at any time
 in the container. In this example if someone manage to open a terminal in this container
@@ -302,14 +344,14 @@ he will be able to read the admin password in clear text from environment variab
 For example if your environment files **my-env.yaml** and **my-env.startup.yaml** are in /data/ldap/environment
 
 	docker run --volume /data/ldap/environment:/container/environment/01-custom \
-	--detach osixia/openldap:1.1.8
+	--detach osixia/openldap:1.1.10
 
 Take care to link your environment files folder to `/container/environment/XX-somedir` (with XX < 99 so they will be processed before default environment files) and not  directly to `/container/environment` because this directory contains predefined baseimage environment files to fix container environment (INITRD, LANG, LANGUAGE and LC_CTYPE).
 
 Note: the container will try to delete the **\*.startup.yaml** file after the end of startup files so the file will also be deleted on the docker host. To prevent that : use --volume /data/ldap/environment:/container/environment/01-custom**:ro** or set all variables in **\*.yaml** file and don't use **\*.startup.yaml**:
 
 	docker run --volume /data/ldap/environment/my-env.yaml:/container/environment/01-custom/env.yaml \
-	--detach osixia/openldap:1.1.8
+	--detach osixia/openldap:1.1.10
 
 #### Make your own image or extend this image
 
@@ -317,13 +359,13 @@ This is the best solution if you have a private registry. Please refer to the [A
 
 ## Advanced User Guide
 
-### Extend osixia/openldap:1.1.8 image
+### Extend osixia/openldap:1.1.10 image
 
 If you need to add your custom TLS certificate, bootstrap config or environment files the easiest way is to extends this image.
 
 Dockerfile example:
 
-	FROM osixia/openldap:1.1.8
+	FROM osixia/openldap:1.1.10
 	MAINTAINER Your Name <your@name.com>
 
 	ADD bootstrap /container/service/slapd/assets/config/bootstrap
@@ -345,7 +387,7 @@ Clone this project:
 Adapt Makefile, set your image NAME and VERSION, for example:
 
 	NAME = osixia/openldap
-	VERSION = 1.1.8
+	VERSION = 1.1.9
 
 	become:
 	NAME = cool-guy/openldap
